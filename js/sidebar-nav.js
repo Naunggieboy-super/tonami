@@ -1,50 +1,33 @@
 (() => {
   'use strict';
 
-  const mobileMenu = document.getElementById('mobileMenu');
-  const sidebarToggle = document.getElementById('sidebarMenuToggle');
+  const menu = document.getElementById('mobileMenu');
+  const drawerButton = document.getElementById('sidebarMenuToggle');
   const sidebar = document.getElementById('sidebar');
-  if (!mobileMenu || !sidebar) return;
+  if (!menu || !sidebar) return;
 
-  const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
-  const setOpen = (open) => {
+  const mobile = () => window.matchMedia('(max-width: 760px)').matches;
+  const sync = (open) => {
     document.body.classList.toggle('sidebar-open', open);
-    mobileMenu.setAttribute('aria-expanded', String(open));
-    mobileMenu.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
+    menu.setAttribute('aria-expanded', String(open));
+    menu.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
     sidebar.setAttribute('aria-hidden', String(!open));
-    if (sidebarToggle) {
-      sidebarToggle.setAttribute('aria-expanded', String(open));
-      sidebarToggle.setAttribute('aria-label', open ? 'Hide navigation menu' : 'Show navigation menu');
-      const label = sidebarToggle.querySelector('[data-menu-label], span:last-child');
+    if (drawerButton) {
+      drawerButton.setAttribute('aria-expanded', String(open));
+      drawerButton.setAttribute('aria-label', open ? 'Hide navigation menu' : 'Show navigation menu');
+      const label = drawerButton.querySelector('[data-menu-label]');
       if (label) label.textContent = open ? 'Hide menu' : 'Show menu';
     }
   };
+  const toggle = (event) => { event.preventDefault(); event.stopPropagation(); sync(!document.body.classList.contains('sidebar-open')); };
 
-  // Capture the click before app.js' legacy handlers so the button toggles exactly once.
+  // One delegated capture handler avoids duplicate listeners from older app bundles.
   document.addEventListener('click', (event) => {
-    const trigger = event.target.closest('#mobileMenu, #sidebarMenuToggle');
-    if (!trigger) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    setOpen(!document.body.classList.contains('sidebar-open'));
+    if (event.target.closest('#mobileMenu, #sidebarMenuToggle')) toggle(event);
   }, true);
-
-  sidebar.addEventListener('click', (event) => {
-    if (isMobile() && event.target.closest('.nav-item')) setOpen(false);
-  });
-
-  document.addEventListener('click', (event) => {
-    if (!isMobile() || !document.body.classList.contains('sidebar-open')) return;
-    if (!sidebar.contains(event.target) && !mobileMenu.contains(event.target)) setOpen(false);
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setOpen(false);
-  });
-
-  window.addEventListener('resize', () => {
-    if (!isMobile()) setOpen(false);
-  }, { passive: true });
-
-  setOpen(false);
+  sidebar.addEventListener('click', (event) => { if (mobile() && event.target.closest('.nav-item')) sync(false); });
+  document.addEventListener('click', (event) => { if (mobile() && document.body.classList.contains('sidebar-open') && !sidebar.contains(event.target) && !menu.contains(event.target)) sync(false); });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') sync(false); });
+  window.addEventListener('resize', () => { if (!mobile()) sync(false); }, { passive:true });
+  sync(false);
 })();
