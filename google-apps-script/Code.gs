@@ -2,7 +2,7 @@ const SPREADSHEET_ID = '';
 
 const TRANSACTION_HEADERS = ['id', 'type', 'amount', 'date', 'category', 'note', 'loanId', 'createdAt'];
 const CATEGORY_HEADERS = ['name', 'type', 'createdAt'];
-const BUDGET_HEADERS = ['category', 'amount'];
+const BUDGET_HEADERS = ['id', 'category', 'month', 'amount', 'createdAt'];
 const GOAL_HEADERS = ['name', 'target', 'saved'];
 const LOAN_HEADERS = ['id', 'name', 'principal', 'remaining', 'date', 'note', 'createdAt'];
 
@@ -31,6 +31,7 @@ function doPost(e) {
     const request = JSON.parse(body);
     if (request.action === 'getAll') return json({ ok: true, data: readAll() });
     if (request.action === 'status') return json({ ok: true, data: status() });
+    if (request.action === 'appendDelta') return json({ ok: true, data: appendDelta(request) });
     if (request.action === 'replaceAll' || request.action === 'writeAll') return json({ ok: true, data: writeAll(request) });
     return json({ ok: false, error: 'Unknown action' });
   } catch (error) {
@@ -49,7 +50,7 @@ function sheet(name, headers) {
 function rows(name, headers) {
   const values = sheet(name, headers).getDataRange().getValues();
   if (values.length < 2) return [];
-  return values.slice(1).filter(row => row.some(value => value !== '')).map(row => {
+  return values.slice(1).filter((row) => row.some((value) => value !== '')).map((row) => {
     const item = {};
     headers.forEach((header, index) => { item[header] = row[index]; });
     return item;
@@ -92,9 +93,14 @@ function normalizeTransaction(value) {
   if (type === 'loan' || category.toLowerCase() === 'loan') type = 'income';
   if (category.toLowerCase() === 'loan repayment' || category.toLowerCase() === 'loan payback') type = 'expense';
   return {
-    id: String(item.id || Utilities.getUuid()), type: type, amount: num(item.amount),
-    date: formatDate(item.date), category: category, note: String(item.note || ''),
-    loanId: String(item.loanId || ''), createdAt: iso(item.createdAt)
+    id: String(item.id || Utilities.getUuid()),
+    type,
+    amount: num(item.amount),
+    date: formatDate(item.date),
+    category,
+    note: String(item.note || ''),
+    loanId: String(item.loanId || ''),
+    createdAt: iso(item.createdAt)
   };
 }
 
@@ -105,7 +111,13 @@ function normalizeCategory(value) {
 
 function normalizeBudget(value) {
   const item = value || {};
-  return { category: String(item.category || '').trim(), amount: num(item.amount) };
+  return {
+    id: String(item.id || Utilities.getUuid()),
+    category: String(item.category || '').trim(),
+    month: String(item.month || '').slice(0, 7),
+    amount: num(item.amount),
+    createdAt: iso(item.createdAt)
+  };
 }
 
 function normalizeGoal(value) {
@@ -117,48 +129,68 @@ function normalizeLoan(value) {
   const item = value || {};
   const principal = num(item.principal || item.amount);
   return {
-    id: String(item.id || Utilities.getUuid()), name: String(item.name || 'Loan').trim(),
-    principal: principal, remaining: Math.max(0, num(item.remaining === undefined ? principal : item.remaining)),
-    date: formatDate(item.date), note: String(item.note || ''), createdAt: iso(item.createdAt)
+    id: String(item.id || Utilities.getUuid()),
+    name: String(item.name || 'Loan').trim(),
+    principal,
+    remaining: Math.max(0, num(item.remaining === undefined ? principal : item.remaining)),
+    date: formatDate(item.date),
+    note: String(item.note || ''),
+    createdAt: iso(item.createdAt)
   };
 }
 
 function uniqueCategories(values) {
   const result = [];
-  values.forEach(value => {
+  values.forEach((value) => {
     const item = normalizeCategory(value);
     if (!item.name) return;
-    if (!result.some(existing => existing.name.toLowerCase() === item.name.toLowerCase() && existing.type === item.type)) result.push(item);
+    if (!result.some((existing) => existing.name.toLowerCase() === item.name.toLowerCase() && existing.type === item.type)) result.push(item);
   });
   return result;
 }
 
-function addMissingLoans(loans, transactions) {
-  const result = loans.slice();
-  transactions.filter(tx => tx.type === 'income' && tx.loanId).forEach(tx => {
-    if (!result.some(loan => String(loan.id) === String(tx.loanId))) {
-      result.push(normalizeLoan({ id: tx.loanId, name: tx.note || 'Loan', principal: tx.amount, remaining: tx.amount, date: tx.date, note: tx.note, createdAt: tx.createdAt }));
-    }
-  });
-  return result;
+function keyFor(item, field) {
+  return String(item && item[field] !== undefined ? item[field] : '');
 }
 
-function applyRepayments(loans, transactions) {
-  return loans.map(loan => {
-    const copy = Object.assign({}, loan);
-    const paid = transactions.filter(tx => tx.type === 'expense' && tx.loanId && String(tx.loanId) === String(copy.id)).reduce((sum, tx) => sum + num(tx.amount), 0);
-    copy.remaining = Math.max(0, num(copy.remaining) - paid);
-    return copy;
-  });
+function upsertTable(name, headers, values, field) {
+  const target = sheet(name, headers);
+  const existingRows = rows(name, headers);
+  const merged = [...existingRows, ...values].reduce((result, item) => {
+    const key = keyFor(item, field);
+    if (!key) return result;
+    const index = result.findIndex((entry) => String(keyFor(entry, field)) === String(key));
+    if (index >= 0) result[index] = item;
+    else result.push(item);
+    return result;
+  }, []);
+
+  target.clearContents();
+  target.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (merged.length) target.getRange(2, 1, merged.length, headers.length).setValues(merged.map((item) => headers.map((header) => item[header] ?? '')));
+  target.setFrozenRows(1);
+}
+
+function appendDelta(payload) {
+  const transactions = (payload.transactions || []).map(normalizeTransaction).filter((item) => item.id && item.category);
+  const categories = uniqueCategories(payload.categories || []).filter((item) => item.name);
+  const budgets = (payload.budgets || []).map(normalizeBudget).filter((item) => item.category && item.month);
+  const loans = (payload.loans || []).map(normalizeLoan).filter((item) => item.id);
+
+  if (transactions.length) upsertTable('Transactions', TRANSACTION_HEADERS, transactions, 'id');
+  if (categories.length) upsertTable('Categories', CATEGORY_HEADERS, categories, 'name');
+  if (budgets.length) upsertTable('Budgets', BUDGET_HEADERS, budgets, 'id');
+  if (loans.length) upsertTable('Loans', LOAN_HEADERS, loans, 'id');
+
+  return { synced: true, counts: { transactions: transactions.length, categories: categories.length, budgets: budgets.length, loans: loans.length } };
 }
 
 function readAll() {
   const transactions = rows('Transactions', TRANSACTION_HEADERS).map(normalizeTransaction);
   const categories = uniqueCategories(rows('Categories', CATEGORY_HEADERS));
-  const budgets = rows('Budgets', BUDGET_HEADERS).map(normalizeBudget).filter(item => item.category);
-  const goals = rows('Goals', GOAL_HEADERS).map(normalizeGoal).filter(item => item.name);
-  const rawLoans = rows('Loans', LOAN_HEADERS).map(normalizeLoan);
-  const loans = applyRepayments(addMissingLoans(rawLoans, transactions), transactions);
+  const budgets = rows('Budgets', BUDGET_HEADERS).map(normalizeBudget).filter((item) => item.category);
+  const goals = rows('Goals', GOAL_HEADERS).map(normalizeGoal).filter((item) => item.name);
+  const loans = rows('Loans', LOAN_HEADERS).map(normalizeLoan);
   const data = { transactions, categories, budgets, goals, loans };
   data.revision = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(data), Utilities.Charset.UTF_8));
   return data;
@@ -172,14 +204,650 @@ function status() {
 function writeAll(payload) {
   const transactions = (payload.transactions || []).map(normalizeTransaction);
   const categories = uniqueCategories(payload.categories || []);
-  const budgets = (payload.budgets || []).map(normalizeBudget).filter(item => item.category);
-  const goals = (payload.goals || []).map(normalizeGoal).filter(item => item.name);
-  const loans = applyRepayments(addMissingLoans((payload.loans || []).map(normalizeLoan).filter(item => item.id), transactions), transactions);
+  const budgets = (payload.budgets || []).map(normalizeBudget).filter((item) => item.category);
+  const goals = (payload.goals || []).map(normalizeGoal).filter((item) => item.name);
+  const loans = (payload.loans || []).map(normalizeLoan).filter((item) => item.id);
 
-  writeTable('Transactions', TRANSACTION_HEADERS, transactions.map(tx => [tx.id, tx.type, tx.amount, tx.date, tx.category, tx.note, tx.loanId, tx.createdAt]));
-  writeTable('Categories', CATEGORY_HEADERS, categories.map(item => [item.name, item.type, item.createdAt]));
-  writeTable('Budgets', BUDGET_HEADERS, budgets.map(item => [item.category, item.amount]));
-  writeTable('Goals', GOAL_HEADERS, goals.map(item => [item.name, item.target, item.saved]));
-  writeTable('Loans', LOAN_HEADERS, loans.map(item => [item.id, item.name, item.principal, item.remaining, item.date, item.note, item.createdAt]));
+  writeTable('Transactions', TRANSACTION_HEADERS, transactions.map((tx) => [tx.id, tx.type, tx.amount, tx.date, tx.category, tx.note, tx.loanId, tx.createdAt]));
+  writeTable('Categories', CATEGORY_HEADERS, categories.map((item) => [item.name, item.type, item.createdAt]));
+  writeTable('Budgets', BUDGET_HEADERS, budgets.map((item) => [item.id, item.category, item.month, item.amount, item.createdAt]));
+  writeTable('Goals', GOAL_HEADERS, goals.map((item) => [item.name, item.target, item.saved]));
+  writeTable('Loans', LOAN_HEADERS, loans.map((item) => [item.id, item.name, item.principal, item.remaining, item.date, item.note, item.createdAt]));
   return readAll();
 }
+
+// Preserve compatibility with the existing spreadsheet naming and payload schema.
+function appendDeltaLegacy(payload) {
+  return appendDelta(payload);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+n
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+n
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"
