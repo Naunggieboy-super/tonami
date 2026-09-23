@@ -1,0 +1,16 @@
+/* Mobile sidebar reliability overrides */
+@media (max-width: 760px) {
+  body.sidebar-open { overflow: hidden; }
+  body.sidebar-open::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgba(2, 6, 23, .55);
+    backdrop-filter: blur(2px);
+  }
+  body.sidebar-open .sidebar { transform: translateX(0); visibility: visible; pointer-events: auto; }
+  .sidebar { visibility: hidden; pointer-events: none; transition: transform .25s ease, visibility .25s ease; }
+  .sidebar-menu-toggle { position: relative; z-index: 101; }
+  .mobile-menu { position: relative; z-index: 101; }
+}
