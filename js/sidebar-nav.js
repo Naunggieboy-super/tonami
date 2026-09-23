@@ -1,58 +1,42 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#07111f">
-  <meta name="description" content="MoneyFlow personal budget and spending tracker">
-  <title>MoneyFlow</title>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="css/app.css">
-  <link rel="stylesheet" href="css/sidebar-premium.css">
-</head>
-<body class="dark">
-  <div class="app-layout">
-    <aside class="sidebar" id="sidebar" aria-label="MoneyFlow navigation">
-      <div class="brand"><span class="brand-mark">M</span><div><strong>MoneyFlow</strong><small>Personal finance</small></div></div>
-      <nav class="main-nav" aria-label="Main navigation">
-        <button class="nav-item active" type="button" data-page="home"><span aria-hidden="true">⌂</span><span>Home</span></button>
-        <button class="nav-item" type="button" data-page="dashboard"><span aria-hidden="true">◔</span><span>Insights</span></button>
-        <button class="nav-item" type="button" data-page="add"><span aria-hidden="true">＋</span><span>Add record</span></button>
-        <button class="nav-item" type="button" data-page="transactions"><span aria-hidden="true">▤</span><span>Transactions</span></button>
-        <button class="nav-item" type="button" data-page="settings"><span aria-hidden="true">⚙</span><span>Settings</span></button>
-      </nav>
-      <div class="sidebar-footer"><button class="theme-button" id="themeButton" type="button" data-action="theme-toggle"><span aria-hidden="true">◐</span><span id="themeButtonText">Dark mode</span></button></div>
-    </aside>
+(() => {
+  'use strict';
 
-    <div class="main-area">
-      <header class="topbar">
-        <button class="mobile-menu" id="mobileMenu" type="button" aria-label="Show navigation menu" aria-controls="sidebar" aria-expanded="false">☰</button>
-        <div class="topbar-copy"><small>MoneyFlow</small><h2>Personal dashboard</h2></div>
-        <div class="topbar-actions"><label class="month-picker" for="monthSelect"><span>Month</span><select id="monthSelect" aria-label="Choose reporting month"></select></label><button class="ghost-btn" type="button" data-action="sync-google">Sync</button></div>
-      </header>
+  const sidebar = document.getElementById('sidebar');
+  const menu = document.getElementById('mobileMenu');
+  const app = document.querySelector('.app-layout');
+  if (!sidebar || !menu || !app) return;
 
-      <main class="pages">
-        <section id="home" class="page active">
-          <div class="hero panel"><div><small id="greet">GOOD MORNING</small><h1 id="greetTitle">Good morning 🌅</h1><p id="focusMsg">Your money story will appear here.</p></div></div>
-          <div class="cards" id="cards"></div>
-          <div class="panel"><div class="section-head"><h3>Daily budget</h3></div><div class="daily-budget"><strong id="dailyBudgetValue">0 MMK</strong><small id="dailyBudgetMeta">0 days remaining · Net 0 MMK</small></div></div>
-          <div class="panel"><div class="section-head"><h3>Budget alerts</h3></div><div id="budgetAlerts" aria-live="polite"></div></div>
-        </section>
+  const setOpen = (open) => {
+    app.classList.toggle('sidebar-collapsed', !open);
+    sidebar.classList.toggle('sidebar-collapsed', !open);
+    menu.setAttribute('aria-expanded', String(open));
+    menu.setAttribute('aria-label', open ? 'Hide navigation menu' : 'Show navigation menu');
+    const toggle = document.getElementById('sidebarMenuToggle');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.querySelector('[data-menu-label]')?.replaceChildren(document.createTextNode(open ? 'Hide menu' : 'Show menu'));
+    }
+  };
 
-        <section id="dashboard" class="page"><div class="section-title"><small>Money intelligence</small><h1>Dashboard</h1><p>Budget, cash flow and loan insight</p></div><div class="stats-grid"><article class="stat-card panel"><small>Cash flow</small><strong id="cashflow">0 MMK</strong></article><article class="stat-card panel"><small>Budget used</small><strong id="budgetUsed">0 MMK</strong></article><article class="stat-card panel"><small>Loan balance</small><strong id="loanBalance">0 MMK</strong></article></div><div class="panel chart-panel"><div class="section-head"><h3>Budget vs spending</h3></div><div id="budgetVsSpendingChart" class="bar-chart"></div></div><div class="panel"><div class="section-head"><h3>Loan trend</h3></div><div id="loanTrendChart" class="loan-chart"></div><div id="loanList" class="loan-list"></div></div></section>
+  const footer = sidebar.querySelector('.sidebar-footer') || sidebar.appendChild(Object.assign(document.createElement('div'), { className: 'sidebar-footer' }));
+  if (!document.getElementById('sidebarMenuToggle')) {
+    const toggle = document.createElement('button');
+    toggle.id = 'sidebarMenuToggle';
+    toggle.type = 'button';
+    toggle.className = 'sidebar-menu-toggle';
+    toggle.setAttribute('aria-label', 'Show navigation menu');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.innerHTML = '<span aria-hidden="true">☰</span><span data-menu-label>Show menu</span>';
+    footer.prepend(toggle);
+    toggle.addEventListener('click', () => setOpen(!app.classList.contains('sidebar-collapsed')));
+  }
 
-        <section id="add" class="page"><div class="section-title"><small>Transaction</small><h1 id="formTitle">Add record</h1></div><div class="panel"><div class="section-head"><h3>New transaction</h3></div><form id="transactionForm" class="stack-form"><label><span>Type</span><select name="type" aria-label="Transaction type"></select></label><label><span>Category</span><select name="category" aria-label="Category"></select></label><label><span>Amount</span><input name="amount" type="number" min="1" step="0.01" required></label><label><span>Date</span><input name="date" type="date" required></label><label><span>Note</span><input name="note" type="text" placeholder="Optional note"></label><button class="primary-btn" type="submit">Save transaction</button></form></div></section>
-
-        <section id="transactions" class="page"><div class="section-title"><small>History</small><h1>Transactions</h1></div><div class="panel"><div class="section-head"><h3>Activity</h3></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Note</th><th>Action</th></tr></thead><tbody id="transactionTable"></tbody></table></div></div></section>
-
-        <section id="settings" class="page"><div class="section-title"><small>Customize</small><h1>Settings</h1></div><div class="panel"><div class="section-head"><h3>Preferences</h3></div><div class="settings-list"><label class="toggle-row"><span>Dark mode</span><input id="themeToggle" type="checkbox" checked></label><label class="field"><span>Google Sheets sync URL</span><input id="syncUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label></div></div><div class="panel"><div class="section-head"><h3>Categories</h3></div><div id="categoryList" class="category-list"></div></div></section>
-      </main>
-    </div>
-  </div>
-
-  <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
-  <script src="js/app.js" defer></script>
-  <script src="js/sidebar-nav.js" defer></script>
-  <script src="js/runtime-fixes.js" defer></script>
-</body>
-</html>
+  menu.addEventListener('click', () => setOpen(app.classList.contains('sidebar-collapsed')));
+  sidebar.addEventListener('click', (event) => { if (event.target.closest('.nav-item')) setOpen(false); });
+  document.addEventListener('click', (event) => {
+    if (window.innerWidth <= 760 && !app.classList.contains('sidebar-collapsed') && !sidebar.contains(event.target) && !menu.contains(event.target)) setOpen(false);
+  });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') setOpen(false); });
+  window.addEventListener('resize', () => { if (window.innerWidth > 760) setOpen(false); }, { passive: true });
+  setOpen(false);
+})();
